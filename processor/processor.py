@@ -7,7 +7,7 @@ from pika.adapters.blocking_connection import BlockingChannel
 from pika.spec import Basic, BasicProperties
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
-QUEUE_NAME = os.getenv("QUEUE_NAME")
+DATA_QUEUE = os.getenv("DATA_QUEUE")
 PROCESSOR_ID = os.getenv("PROCESSOR_ID")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -20,7 +20,7 @@ def process_data(data: dict) -> None:
 def consumer() -> None:
     connection = BlockingConnection(URLParameters(RABBITMQ_HOST))
     channel = connection.channel()
-    channel.queue_declare(queue=QUEUE_NAME)
+    channel.queue_declare(queue=DATA_QUEUE)
 
     def callback(
         channel: BlockingChannel, method: Basic.Deliver, properties: BasicProperties, body: bytes
@@ -31,7 +31,7 @@ def consumer() -> None:
         process_data(data)
 
     channel.basic_qos(prefetch_count=1)
-    channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
+    channel.basic_consume(queue=DATA_QUEUE, on_message_callback=callback)
     logging.info("Waiting for messages. To exit press CTRL+C")
     channel.start_consuming()
 
