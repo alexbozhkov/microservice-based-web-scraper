@@ -1,0 +1,41 @@
+import os
+import json
+import logging
+import time
+import pika
+from pika.adapters.blocking_connection import BlockingChannel
+from pika.spec import Basic, BasicProperties
+
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
+QUEUE_NAME = os.getenv("QUEUE_NAME")
+PROCESSOR_ID = os.getenv("PROCESSOR_ID")
+
+
+def process_data(data: dict) -> None:
+    logging.info(f"Processing data for PROCESSOR_ID: {PROCESSOR_ID} \ndata: {data}")
+    print(f"Processing data for PROCESSOR_ID: {PROCESSOR_ID} \ndata: {data}")
+
+
+def consumer() -> None:
+    print("####################### IN ! CONSUMER")
+    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_HOST))
+    channel = connection.channel()
+    channel.queue_declare(queue=QUEUE_NAME)
+
+    def callback(
+        channel: BlockingChannel, method: Basic.Deliver, properties: BasicProperties, body: bytes
+    ):
+        time.sleep(5)
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+        data = json.loads(body)
+        process_data(data)
+
+    channel.basic_qos(prefetch_count=1)
+    channel.basic_consume(queue=QUEUE_NAME, on_message_callback=callback)
+    logging.info("Waiting for messages. To exit press CTRL+C")
+    print("Waiting for messages. To exit press CTRL+C")
+    channel.start_consuming()
+
+
+if __name__ == "__main__":
+    consumer()
