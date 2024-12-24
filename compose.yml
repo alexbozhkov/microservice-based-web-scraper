@@ -12,6 +12,7 @@ services:
   processor_one:
     build:
       context: ./processor
+    container_name: processor_one
     environment:
       - PROCESSOR_ID=1
     env_file:
@@ -24,6 +25,7 @@ services:
   processor_two:
     build:
       context: ./processor
+    container_name: processor_two
     environment:
       - PROCESSOR_ID=2
     env_file:
