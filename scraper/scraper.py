@@ -1,58 +1,90 @@
 import asyncio
-import aiohttp
 import logging
-import time
-import json
 import os
-import pika
+import json
+from aiohttp import ClientSession
+from pika import BlockingConnection, URLParameters
+from pika.adapters.blocking_connection import BlockingChannel
+from pika.spec import Basic, BasicProperties
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
-QUEUE_NAME = os.getenv("QUEUE_NAME", "scraped_data")
-
+URL_QUEUE = os.getenv("URL_QUEUE", "url_queue")
+DATA_QUEUE = os.getenv("DATA_QUEUE", "scraped_data")
 RATE_LIMIT = int(os.getenv("RATE_LIMIT", 5))
 
 
-async def scrape_url(session, url) -> dict:
-    async with session.get(url) as response:
-        html = await response.text()
-        logging.info("#"*100, "SCRAPE ITERATION")
-        print("#"*100, "SCRAPE ITERATION")
-        return {"url": url, "content": html[:200]}
+async def fetch_html(session: ClientSession, url: str) -> dict[str, str]:
+    try:
+        async with session.get(url) as response:
+            if response.status == 200:
+                html = await response.text()
+                logging.info(f"Scraped successfully: {url} (Length: {len(html)})")
+                return {"url": url, "content": html[:200]}
+            else:
+                logging.error(f"Failed to scrape {url}: HTTP {response.status}")
+                return {"url": url, "error": f"HTTP {response.status}"}
+    except Exception as e:
+        logging.error(f"Error scraping {url}: {e}")
+        return {"url": url, "error": str(e)}
 
 
-async def scrape_with_throttle(urls) -> list[dict]:
-    results = []
+async def scrape_urls(urls: list[str]) -> list[dict[str, str]]:
     semaphore = asyncio.Semaphore(RATE_LIMIT)
 
-    async def scrape_semaphore(url: str):
+    async def scrape_semaphore(url: str) ->  dict[str, str]:
         async with semaphore:
-            return await scrape_url(session, url)
+            return await fetch_html(session, url)
 
-    async with aiohttp.ClientSession() as session:
-        tasks = [scrape_semaphore(url) for url in urls]
-        results = await asyncio.gather(*tasks)
-    return results
+    async with ClientSession() as session:
+        return await asyncio.gather(*(scrape_semaphore(url) for url in urls))
 
 
-def send_to_queue(data: list) -> None:
-    connection = pika.BlockingConnection(pika.URLParameters(RABBITMQ_HOST)
-)
-    channel = connection.channel()
-    channel.queue_declare(queue=QUEUE_NAME)
-    for item in data:
-        channel.basic_publish(exchange="", routing_key=QUEUE_NAME, body=json.dumps(item))
-    connection.close()
+def publish_to_queue(queue_name: str, messages: list[dict[str, str]]) -> None:
+    try:
+        connection = BlockingConnection(URLParameters(RABBITMQ_HOST))
+        channel = connection.channel()
+        channel.queue_declare(queue=queue_name)
+
+        for message in messages:
+            channel.basic_publish(exchange="", routing_key=queue_name, body=json.dumps(message))
+            logging.info(f"Published to {queue_name} for url: {message['url']}")
+        connection.close()
+    except Exception as e:
+        logging.error(f"Error publishing to RabbitMQ: {e}")
 
 
-async def main():
-    urls = ["https://toscrape.com/", "https://quotes.toscrape.com/", "https://books.toscrape.com/"]
-    logging.info("Starting async scraping...")
-    start_time = time.time()
-    scraped_data = await scrape_with_throttle(urls)
-    logging.info(f"Scraping completed in {time.time() - start_time} seconds.")
-    send_to_queue(scraped_data)
-    logging.info("Data sent to RabbitMQ.")
+
+async def process_urls() -> None:
+    def consume_callback(
+        channel: BlockingChannel, method: Basic.Deliver, properties: BasicProperties, body: bytes
+    ) -> None:
+        url = body.decode()
+        logging.info(f"Received URL: {url}")
+        urls.append(url)
+        channel.basic_ack(delivery_tag=method.delivery_tag)
+
+    urls = []
+    try:
+        connection = BlockingConnection(URLParameters(RABBITMQ_HOST))
+        channel = connection.channel()
+        channel.queue_declare(queue=URL_QUEUE)
+        channel.basic_consume(
+            queue=URL_QUEUE, on_message_callback=consume_callback, auto_ack=False
+        )
+        logging.info(f"Listening for messages on queue: {URL_QUEUE}")
+
+        while True:
+            if urls:
+                scraped_data = await scrape_urls(urls)
+                publish_to_queue(DATA_QUEUE, scraped_data)
+                urls.clear()
+            connection.process_data_events(time_limit=1)
+            await asyncio.sleep(1)
+    except Exception as e:
+        logging.error(f"Error in processing loop: {e}")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(process_urls())
