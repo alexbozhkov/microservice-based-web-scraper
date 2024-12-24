@@ -1,0 +1,47 @@
+services:
+  scraper:
+    build:
+      context: ./scraper
+    env_file:
+      - .env
+    depends_on:
+      - rabbit_mq
+    volumes:
+      - ./scraper:/app
+
+  processor_one:
+    build:
+      context: ./processor
+    environment:
+      - PROCESSOR_ID=1
+    env_file:
+      - .env
+    depends_on:
+      - rabbit_mq
+    volumes:
+      - ./processor:/app
+
+  processor_two:
+    build:
+      context: ./processor
+    environment:
+      - PROCESSOR_ID=2
+    env_file:
+      - .env
+    depends_on:
+      - rabbit_mq
+    volumes:
+      - ./processor:/app
+
+  rabbit_mq:
+    image: rabbitmq:4.1-rc-management
+    container_name: rabbit_mq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbit_mqdata:/usr/share/rabbitmq/data
+
+volumes:
+    rabbit_mqdata:
+      driver: local
