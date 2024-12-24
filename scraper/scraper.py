@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "localhost")
 URL_QUEUE = os.getenv("URL_QUEUE", "url_queue")
 DATA_QUEUE = os.getenv("DATA_QUEUE", "scraped_data")
+DEAD_LETTER_QUEUE = os.getenv("DEAD_LETTER_QUEUE", "dead_letter_queue")
 RATE_LIMIT = int(os.getenv("RATE_LIMIT", 5))
 
 
@@ -55,7 +56,6 @@ def publish_to_queue(queue_name: str, messages: list[dict[str, str]]) -> None:
         logging.error(f"Error publishing to RabbitMQ: {e}")
 
 
-
 async def process_urls() -> None:
     def consume_callback(
         channel: BlockingChannel, method: Basic.Deliver, properties: BasicProperties, body: bytes
@@ -78,7 +78,15 @@ async def process_urls() -> None:
         while True:
             if urls:
                 scraped_data = await scrape_urls(urls)
-                publish_to_queue(DATA_QUEUE, scraped_data)
+                successful = [item for item in scraped_data if "error" not in item]
+                failed = [item for item in scraped_data if "error" in item]
+
+                if successful:
+                    publish_to_queue(DATA_QUEUE, successful)
+                if failed:
+                    logging.warning(f"Publishing {len(failed)} failed messages to DLQ.")
+                    publish_to_queue(DEAD_LETTER_QUEUE, failed)
+
                 urls.clear()
             connection.process_data_events(time_limit=1)
             await asyncio.sleep(1)
