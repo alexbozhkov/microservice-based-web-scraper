@@ -84,7 +84,7 @@ async def process_urls() -> None:
                 if successful:
                     publish_to_queue(DATA_QUEUE, successful)
                 if failed:
-                    logging.warning(f"Publishing {len(failed)} failed messages to DLQ.")
+                    logging.warning(f"\033[91mPublishing {len(failed)} failed messages to DLQ.\033[0m")
                     publish_to_queue(DEAD_LETTER_QUEUE, failed)
 
                 urls.clear()

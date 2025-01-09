@@ -14,7 +14,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 
 def process_data(data: dict) -> None:
-    logging.info(f"Processing data for PROCESSOR_ID: {PROCESSOR_ID} \ndata: {data}")
+    logging.info(f"\033[32mProcessing data for PROCESSOR_ID: {PROCESSOR_ID} \ndata: {data}\033[0m")
 
 
 def consumer() -> None:
